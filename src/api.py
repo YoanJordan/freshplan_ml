@@ -4,7 +4,6 @@ from typing import List
 import pandas as pd
 import pickle
 import os
-import sys
 
 app = FastAPI(title="FreshPlan ML API")
 
@@ -25,7 +24,6 @@ recipe_ids = model_data['recipe_ids']
 class RecommendationRequest(BaseModel):
     user_id: int
     fridge_ingredients: List[str]
-    allergens: List[str] = []
     history_count: int = 0
     n_recommendations: int = 10
 
@@ -46,14 +44,6 @@ def content_score(fridge_ingredients, recipe_ingredients_str):
     matches = sum(1 for ingredient in recipe if any(f in ingredient or ingredient in f for f in fridge))
     return matches / len(recipe)
 
-def hard_filter(recipes_df, allergens):
-    if not allergens:
-        return recipes_df
-    def contains_allergen(ingredients_str):
-        ingredients = str(ingredients_str).lower()
-        return any(a.lower() in ingredients for a in allergens)
-    return recipes_df[~recipes_df['ingredients'].apply(contains_allergen)]
-
 def final_score(u_idx, recipe_id, fridge_ingredients, weight_content=0.6, weight_preference=0.4):
     if recipe_id in recipe_to_idx:
         r_idx = recipe_to_idx[recipe_id]
@@ -73,14 +63,13 @@ def root():
 
 @app.post("/recommend", response_model=RecommendationResponse)
 def recommend(request: RecommendationRequest):
-    available_recipes = hard_filter(recipes, request.allergens)
     if request.history_count < 5:
         wc, wp, mode = 0.9, 0.1, "COLD-START"
     else:
         wc, wp, mode = 0.6, 0.4, "NORMAL"
     u_idx = user_to_idx.get(request.user_id, 0)
     results = []
-    for _, row in available_recipes.iterrows():
+    for _, row in recipes.iterrows():
         score = final_score(u_idx, row['recipe_id'], request.fridge_ingredients, wc, wp)
         results.append({'recipe_id': int(row['recipe_id']), 'recipe_name': row['recipe_name'], 'score': score})
     top_n = sorted(results, key=lambda x: x['score'], reverse=True)[:request.n_recommendations]
